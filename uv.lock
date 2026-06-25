@@ -1554,9 +1554,9 @@ dependencies = [
     { name = "piper-tts" },
     { name = "pynput" },
     { name = "pywebview" },
-    { name = "pywinpty" },
+    { name = "pywinpty", marker = "sys_platform == 'win32'" },
     { name = "sounddevice" },
-    { name = "winsdk" },
+    { name = "winsdk", marker = "sys_platform == 'win32'" },
 ]
 
 [package.metadata]
@@ -1568,9 +1568,9 @@ requires-dist = [
     { name = "piper-tts", specifier = ">=1.2.0" },
     { name = "pynput", specifier = ">=1.7.7" },
     { name = "pywebview", specifier = ">=5.0" },
-    { name = "pywinpty", specifier = ">=2.0" },
+    { name = "pywinpty", marker = "sys_platform == 'win32'", specifier = ">=2.0" },
     { name = "sounddevice", specifier = ">=0.5.1" },
-    { name = "winsdk", specifier = ">=1.0.0b10" },
+    { name = "winsdk", marker = "sys_platform == 'win32'", specifier = ">=1.0.0b10" },
 ]
 
 [[package]]
