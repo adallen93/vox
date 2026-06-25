@@ -1,8 +1,10 @@
 import asyncio
-# Must be set before any other asyncio or Qt initialization.
+import sys
+
 # Python 3.11 on Windows defaults to ProactorEventLoop; asyncssh and qasync
-# both require SelectorEventLoop.
-asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+# both require SelectorEventLoop.  No-op on Linux (already the default).
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 import argparse
 import logging
