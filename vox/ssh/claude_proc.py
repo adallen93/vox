@@ -106,7 +106,7 @@ class ClaudeProcess:
         cfg = self._config
         add_dirs = " ".join(f'--add-dir "{d}"' for d in cfg.add_dirs)
         return (
-            "cd /home/aallen/vox-harness && "
+            f"cd {cfg.claude_cwd} && "
             f"{cfg.claude_bin}"
             " --print"
             " --input-format stream-json"

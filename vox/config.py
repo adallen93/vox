@@ -16,7 +16,10 @@ class Config:
     claude_bin: str = "/home/aallen/.local/bin/claude"
 
     # --- vox-server (runs on Aragorn; full path to venv python) ---
-    vox_server_python: str = "/home/aallen/vox/.venv/bin/python"
+    vox_server_python: str = "/home/aallen/vox-home/vox/.venv/bin/python"
+
+    # --- Claude working directory on Aragorn ---
+    claude_cwd: str = "/home/aallen/vox-home/vox-harness"
 
     # --- Add-dir roots forwarded to --add-dir on aragorn ---
     add_dirs: list[str] = field(default_factory=lambda: ["/home/aallen"])
