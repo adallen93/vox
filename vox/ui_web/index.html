@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>vox</title>
+  <link rel="stylesheet" href="/static/vendor/xterm.css" />
+  <link rel="stylesheet" href="/static/css/app.css" />
+</head>
+<body>
+  <div id="sidebar">
+    <div id="layer-list"></div>
+    <button id="add-layer-btn" title="New terminal layer">+</button>
+  </div>
+  <div id="content">
+    <!-- vox panel (always present; hidden when a terminal layer is active) -->
+    <div id="panel">
+      <div id="ring"></div>
+      <button id="toggle-btn" title="Activate / deactivate voice">&#9654;</button>
+      <span id="state-label">idle</span>
+      <span id="idle-cue">Click &#9654; to activate voice</span>
+    </div>
+    <pre id="transcript"></pre>
+    <!-- terminal grid (shown when a terminal layer is active) -->
+    <div id="terminal-grid"></div>
+  </div>
+  <script src="/static/vendor/xterm.js"></script>
+  <script src="/static/vendor/xterm-addon-fit.js"></script>
+  <script src="/static/js/ws.js"></script>
+  <script src="/static/js/panel.js"></script>
+  <script src="/static/js/terminal.js"></script>
+  <script src="/static/js/grid.js"></script>
+  <script src="/static/js/layers.js"></script>
+</body>
+</html>

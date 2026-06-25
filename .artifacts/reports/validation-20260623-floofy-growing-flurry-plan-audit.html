@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Plan Audit: vox Re-Architecture: Terminal Multiplexer + Voice Layer</title>
+  <style>
+    body { font-family:system-ui,sans-serif; max-width:860px;
+           margin:2rem auto; padding:0 1.5rem; color:#222; }
+    h1   { font-size:1.4rem; margin-bottom:.25rem; }
+    .meta{ color:#666; font-size:.85rem; margin-bottom:1.5rem; }
+    .counts { display:flex; gap:1rem; margin:.75rem 0 2rem; flex-wrap:wrap; }
+    .chip { padding:.3rem .8rem; border-radius:20px; font-size:.8rem; font-weight:700; }
+    .well h2 { font-size:1rem; margin-top:2rem; color:#444; }
+    .well ul { font-size:.9rem; color:#444; }
+  </style>
+</head>
+<body>
+  <h1>Plan Audit: vox Re-Architecture — Terminal Multiplexer + Voice Layer</h1>
+  <div class="meta">
+    C:\Users\adall\.claude\plans\floofy-growing-flurry.md &nbsp;·&nbsp; Audited 2026-06-23 &nbsp;·&nbsp; Recommendation: <strong>Revise</strong>
+  </div>
+  <div class="counts">
+    <span class="chip" style="background:#ff6b6b;color:#fff;">🚫 1 Blocking</span>
+    <span class="chip" style="background:#ffd93d;color:#000;">⚠️ 3 Judgment Calls</span>
+    <span class="chip" style="background:#74b9ff;color:#000;">ℹ️ 4 Informational</span>
+  </div>
+
+  <!-- BLOCKING -->
+  <div style="border-left:5px solid #ff6b6b; background:#fff; border-radius:6px;
+              margin:1rem 0; padding:1rem 1.25rem; box-shadow:0 1px 4px rgba(0,0,0,.08);">
+    <div style="margin-bottom:.4rem;">
+      <span style="background:#ff6b6b; color:#fff; padding:.2rem .6rem; border-radius:4px;
+                   font-size:.75rem; font-weight:700; letter-spacing:.04em;">
+        🚫 BLOCKING
+      </span>
+      <strong style="margin-left:.6rem; font-size:1rem;">Browser disconnect leaves <code>_ssh_task</code> orphaned with no cleanup path</strong>
+    </div>
+    <p style="margin:.4rem 0 .2rem; font-size:.88rem; color:#555;">
+      <strong>At stake:</strong> If the user closes or refreshes the browser tab without sending <code>vox_deactivate</code>, <code>_ssh_task</code> continues running — SSH connection open, Whisper and TTS models loaded, audio threads alive. The plan's <code>handle_ws</code> cleanup only removes the connection from <code>_conn_queues</code> (no more output routing), but the task itself is never cancelled. Refreshing the browser would let the user send <code>vox_activate</code> again, starting a <em>second</em> <code>_ssh_test</code> task (the old one still holds the SSH connection). On a dev machine this silently accumulates zombie sessions.
+    </p>
+    <div style="margin-top:.6rem; font-size:.88rem;">
+      <strong>Options:</strong>
+      <ol style="margin:.25rem 0 0 1.2rem; padding:0;">
+        <li>When <code>handle_ws</code> detects close/error and the connection count drops to zero, cancel <code>_ssh_task</code> — same code path as <code>vox_deactivate</code>. <em>Tradeoff: if two browser tabs are open and one closes, the session dies. Acceptable given single-user design.</em></li>
+        <li>Track a "last seen" timestamp per WS connection; have <code>_activate_vox</code> always cancel any existing task before creating a new one (already partially in the plan). Then leave orphaned tasks running until the next activation — at worst one zombie until the next <code>vox_activate</code>. <em>Tradeoff: leaked resources until next user interaction.</em></li>
+        <li>Let's discuss this further</li>
+      </ol>
+    </div>
+  </div>
+
+  <!-- JUDGMENT CALL 1 -->
+  <div style="border-left:5px solid #ffd93d; background:#fff; border-radius:6px;
+              margin:1rem 0; padding:1rem 1.25rem; box-shadow:0 1px 4px rgba(0,0,0,.08);">
+    <div style="margin-bottom:.4rem;">
+      <span style="background:#ffd93d; color:#000; padding:.2rem .6rem; border-radius:4px;
+                   font-size:.75rem; font-weight:700; letter-spacing:.04em;">
+        ⚠️ JUDGMENT CALL
+      </span>
+      <strong style="margin-left:.6rem; font-size:1rem;">BG-thread error before <code>ready.set()</code> deadlocks the main thread forever</strong>
+    </div>
+    <p style="margin:.4rem 0 .2rem; font-size:.88rem; color:#555;">
+      <strong>At stake:</strong> The new <code>run_ui</code> BG thread calls <code>ready.set()</code> only after <code>site.start()</code> succeeds. The current Tkinter code (line 264–265 of <code>app.py</code>) has a <code>finally: if not ready.is_set(): ready.set()</code> guard that unblocks the main thread even on error. The plan's pseudocode for the BG thread omits this guard — if <code>site.start()</code> raises (port conflict, missing dependency), the main thread waits on <code>ready.wait(timeout=60.0)</code> for a full 60 seconds before bailing out with a cryptic "failed to start" message.
+    </p>
+    <div style="margin-top:.6rem; font-size:.88rem;">
+      <strong>Options:</strong>
+      <ol style="margin:.25rem 0 0 1.2rem; padding:0;">
+        <li>Preserve the <code>finally: if not ready.is_set(): ready.set()</code> guard from the current code. Add an error slot (e.g., a <code>list</code> the BG thread appends to) so the main thread can re-raise the exception. <em>Tradeoff: a few extra lines; makes startup failures fast and debuggable.</em></li>
+        <li>Keep <code>ready.wait(timeout=60.0)</code> as-is; rely on the 60s timeout to unblock. <em>Tradeoff: a 60-second frozen window with no explanation if the port is taken.</em></li>
+        <li>Let's discuss this further</li>
+      </ol>
+    </div>
+  </div>
+
+  <!-- JUDGMENT CALL 2 -->
+  <div style="border-left:5px solid #ffd93d; background:#fff; border-radius:6px;
+              margin:1rem 0; padding:1rem 1.25rem; box-shadow:0 1px 4px rgba(0,0,0,.08);">
+    <div style="margin-bottom:.4rem;">
+      <span style="background:#ffd93d; color:#000; padding:.2rem .6rem; border-radius:4px;
+                   font-size:.75rem; font-weight:700; letter-spacing:.04em;">
+        ⚠️ JUDGMENT CALL
+      </span>
+      <strong style="margin-left:.6rem; font-size:1rem;">Synchronous thread joins inside <code>_ssh_test</code>'s <code>finally</code> block block the event loop during cancellation</strong>
+    </div>
+    <p style="margin:.4rem 0 .2rem; font-size:.88rem; color:#555;">
+      <strong>At stake:</strong> When <code>_activate_vox</code> cancels and awaits the previous <code>_ssh_task</code>, Python raises <code>CancelledError</code> into <code>_ssh_test</code>'s <code>finally</code> block. That block calls <code>trigger.close()</code> (<code>AppCommandTrigger</code>), which does a synchronous <code>self._thread.join(timeout=2.0)</code> — a blocking call on the event loop thread. This is the same in the current Tkinter code, but cancellation via <code>_activate_vox</code> makes it a routine operation rather than a one-time shutdown. Each <code>vox_deactivate → vox_activate</code> cycle can stall the loop for up to 2 seconds, during which WebSocket messages queue up and the browser appears frozen.
+    </p>
+    <div style="margin-top:.6rem; font-size:.88rem;">
+      <strong>Options:</strong>
+      <ol style="margin:.25rem 0 0 1.2rem; padding:0;">
+        <li>Wrap the blocking join in <code>loop.run_in_executor(None, trigger.close)</code> before the task is cancelled, or add a non-blocking close path to <code>AppCommandTrigger</code>. <em>Tradeoff: more code; cleanly solves the hot path.</em></li>
+        <li>Accept the 2-second stall — in practice <code>vox_deactivate → vox_activate</code> is a rare user action, and the UI shows "responding" state during the gap anyway. <em>Tradeoff: occasional visible freeze; stall is bounded at 2s.</em></li>
+        <li>Let's discuss this further</li>
+      </ol>
+    </div>
+  </div>
+
+  <!-- JUDGMENT CALL 3 -->
+  <div style="border-left:5px solid #ffd93d; background:#fff; border-radius:6px;
+              margin:1rem 0; padding:1rem 1.25rem; box-shadow:0 1px 4px rgba(0,0,0,.08);">
+    <div style="margin-bottom:.4rem;">
+      <span style="background:#ffd93d; color:#000; padding:.2rem .6rem; border-radius:4px;
+                   font-size:.75rem; font-weight:700; letter-spacing:.04em;">
+        ⚠️ JUDGMENT CALL
+      </span>
+      <strong style="margin-left:.6rem; font-size:1rem;"><code>vox --ui</code> no longer auto-activates voice on launch — silent behavioral break</strong>
+    </div>
+    <p style="margin:.4rem 0 .2rem; font-size:.88rem; color:#555;">
+      <strong>At stake:</strong> Currently, <code>vox --ui</code> starts the SSH connection and loads models immediately (the BG thread calls <code>_ssh_test</code> before <code>ready.set()</code>). After the rewrite, the session only activates when the browser sends <code>vox_activate</code>. A user who runs <code>vox --ui</code> and presses Beats before the browser finishes loading gets no recording — the hotkey event has no listener. This is a deliberate architectural change (lazy model load is the whole point), but the plan doesn't document it or update any help text. The verification checklist could pass without ever testing this cold-start path.
+    </p>
+    <div style="margin-top:.6rem; font-size:.88rem;">
+      <strong>Options:</strong>
+      <ol style="margin:.25rem 0 0 1.2rem; padding:0;">
+        <li>Add a note in verification and in the panel's UI that the Beats button is only active after the browser sends <code>vox_activate</code> (e.g., a visible "Click ▶ to activate voice" prompt on load). <em>Tradeoff: minor UI polish; prevents user confusion.</em></li>
+        <li>Have <code>run_ui</code> optionally send a synthetic <code>vox_activate</code> on first WebSocket connection, mirroring the current eager-load behavior. <em>Tradeoff: re-introduces eager model load; defeats lazy-load RAM goal.</em></li>
+        <li>Let's discuss this further</li>
+      </ol>
+    </div>
+  </div>
+
+  <!-- INFORMATIONAL 1 -->
+  <div style="border-left:5px solid #74b9ff; background:#fff; border-radius:6px;
+              margin:1rem 0; padding:1rem 1.25rem; box-shadow:0 1px 4px rgba(0,0,0,.08);">
+    <div style="margin-bottom:.4rem;">
+      <span style="background:#74b9ff; color:#000; padding:.2rem .6rem; border-radius:4px;
+                   font-size:.75rem; font-weight:700; letter-spacing:.04em;">
+        ℹ️ INFORMATIONAL
+      </span>
+      <strong style="margin-left:.6rem; font-size:1rem;"><code>hub.py</code> module docstring will be stale after the rewrite</strong>
+    </div>
+    <p style="margin:.4rem 0 .2rem; font-size:.88rem; color:#555;">
+      <strong>At stake:</strong> The current <code>hub.py</code> docstring (lines 1–12) explicitly references "Tkinter", "<code>queue.Queue</code>", "root.after() polling", and "the Tkinter main thread". After the rewrite none of those concepts exist. A future reader will be confused. The plan doesn't mention updating this docstring.
+    </p>
+    <div style="margin-top:.6rem; font-size:.88rem;">
+      <strong>Options:</strong>
+      <ol style="margin:.25rem 0 0 1.2rem; padding:0;">
+        <li>Replace the module docstring with one that describes the new WS/queue architecture. <em>Tradeoff: easy one-liner fix.</em></li>
+        <li>Delete the docstring entirely — the new architecture is self-evident from the code. <em>Tradeoff: loses the concise thread-safety contract that's currently well-documented.</em></li>
+        <li>Let's discuss this further</li>
+      </ol>
+    </div>
+  </div>
+
+  <!-- INFORMATIONAL 2 -->
+  <div style="border-left:5px solid #74b9ff; background:#fff; border-radius:6px;
+              margin:1rem 0; padding:1rem 1.25rem; box-shadow:0 1px 4px rgba(0,0,0,.08);">
+    <div style="margin-bottom:.4rem;">
+      <span style="background:#74b9ff; color:#000; padding:.2rem .6rem; border-radius:4px;
+                   font-size:.75rem; font-weight:700; letter-spacing:.04em;">
+        ℹ️ INFORMATIONAL
+      </span>
+      <strong style="margin-left:.6rem; font-size:1rem;"><code>wt_settings_path</code> default raises <code>KeyError</code> at import if <code>LOCALAPPDATA</code> is unset</strong>
+    </div>
+    <p style="margin:.4rem 0 .2rem; font-size:.88rem; color:#555;">
+      <strong>At stake:</strong> The plan adds <code>wt_settings_path: Path = field(default_factory=lambda: Path(os.environ["LOCALAPPDATA"]) / ...)</code> to <code>Config</code>. <code>os.environ["LOCALAPPDATA"]</code> raises <code>KeyError</code> if unset (e.g., running as a service, in a minimal CI environment, or WSL). The existing fields use <code>Path.home()</code> which is always available. <code>os.environ.get("LOCALAPPDATA", "")</code> would produce a clearly wrong path that <code>profiles.py</code> can check rather than a hard crash at import time.
+    </p>
+    <div style="margin-top:.6rem; font-size:.88rem;">
+      <strong>Options:</strong>
+      <ol style="margin:.25rem 0 0 1.2rem; padding:0;">
+        <li>Use <code>os.environ.get("LOCALAPPDATA", "")</code> — <code>profiles.py</code> already has a fallback for "file not found". <em>Tradeoff: trivial change; keeps import side-effect-free.</em></li>
+        <li>Leave as <code>os.environ["LOCALAPPDATA"]</code> — this is a Windows-only project and <code>LOCALAPPDATA</code> is always set in a real Windows desktop session. <em>Tradeoff: fragile in non-interactive contexts.</em></li>
+        <li>Let's discuss this further</li>
+      </ol>
+    </div>
+  </div>
+
+  <!-- INFORMATIONAL 3 -->
+  <div style="border-left:5px solid #74b9ff; background:#fff; border-radius:6px;
+              margin:1rem 0; padding:1rem 1.25rem; box-shadow:0 1px 4px rgba(0,0,0,.08);">
+    <div style="margin-bottom:.4rem;">
+      <span style="background:#74b9ff; color:#000; padding:.2rem .6rem; border-radius:4px;
+                   font-size:.75rem; font-weight:700; letter-spacing:.04em;">
+        ℹ️ INFORMATIONAL
+      </span>
+      <strong style="margin-left:.6rem; font-size:1rem;"><code>_STATIC</code> path for the aiohttp static routes is unspecified in <code>server.py</code></strong>
+    </div>
+    <p style="margin:.4rem 0 .2rem; font-size:.88rem; color:#555;">
+      <strong>At stake:</strong> The plan sketches <code>server.py</code> with <code>web.FileResponse(_STATIC / "index.html")</code> and <code>app.router.add_static("/static", _STATIC)</code>, but never defines what <code>_STATIC</code> resolves to. The frontend files live in <code>vox/ui_web/</code> (from the plan's frontend section), but the plan doesn't show the path computation (e.g., <code>Path(__file__).parent.parent / "ui_web"</code>). The executor will have to infer this — fine, but worth being explicit so the path doesn't end up hardcoded differently in two places.
+    </p>
+    <div style="margin-top:.6rem; font-size:.88rem;">
+      <strong>Options:</strong>
+      <ol style="margin:.25rem 0 0 1.2rem; padding:0;">
+        <li>Add one line to <code>server.py</code>'s plan: <code>_STATIC = Path(__file__).parent.parent / "ui_web"</code>. <em>Tradeoff: removes ambiguity; zero implementation risk.</em></li>
+        <li>Leave it to the executor to infer — the structure is clear from context. <em>Tradeoff: risk of a path mismatch between server and the actual directory.</em></li>
+        <li>Let's discuss this further</li>
+      </ol>
+    </div>
+  </div>
+
+  <!-- INFORMATIONAL 4 -->
+  <div style="border-left:5px solid #74b9ff; background:#fff; border-radius:6px;
+              margin:1rem 0; padding:1rem 1.25rem; box-shadow:0 1px 4px rgba(0,0,0,.08);">
+    <div style="margin-bottom:.4rem;">
+      <span style="background:#74b9ff; color:#000; padding:.2rem .6rem; border-radius:4px;
+                   font-size:.75rem; font-weight:700; letter-spacing:.04em;">
+        ℹ️ INFORMATIONAL
+      </span>
+      <strong style="margin-left:.6rem; font-size:1rem;">xterm.js vendor extraction requires <code>npm</code> — undocumented prerequisite</strong>
+    </div>
+    <p style="margin:.4rem 0 .2rem; font-size:.88rem; color:#555;">
+      <strong>At stake:</strong> Phase 2b instructs the executor to run <code>npm pack xterm@5.5.0</code> and extract UMD build files. There is no <code>package.json</code> in the repo and <code>npm</code> is not listed anywhere in the project's dependencies or toolchain documentation. This is a one-time manual step, but if it's not documented in a <code>CONTRIBUTING.md</code> or a <code>scripts/</code> file, the next person (or a fresh machine) will wonder where <code>vendor/xterm.js</code> came from and whether it's safe to update.
+    </p>
+    <div style="margin-top:.6rem; font-size:.88rem;">
+      <strong>Options:</strong>
+      <ol style="margin:.25rem 0 0 1.2rem; padding:0;">
+        <li>Add a short <code>scripts/fetch_vendor.ps1</code> (or shell script) that runs <code>npm pack</code> and places the files. <em>Tradeoff: ~10 lines; makes the vendor step reproducible.</em></li>
+        <li>Check the vendor files into the repo directly (they're ~300 KB). <em>Tradeoff: vendor in VCS; simpler for contributors but inflates repo size.</em></li>
+        <li>Let's discuss this further</li>
+      </ol>
+    </div>
+  </div>
+
+  <div class="well">
+    <h2>What the plan handled well</h2>
+    <ul>
+      <li><strong>Thread-safety constraints are explicit and correct.</strong> The "Critical constraints" section lists the exact invariants (selector loop, call_soon_threadsafe, broadcast-on-loop-thread only) and they match the existing codebase patterns precisely.</li>
+      <li><strong>Per-connection async queue for WS sends is the right design.</strong> Avoiding <code>await ws.send_str()</code> in the TextDelta hot loop, with a maxsize queue and per-type overflow policy, correctly prevents backpressure from a slow browser tab stalling the audio pipeline.</li>
+      <li><strong>Race-condition-free startup ordering is clearly specified.</strong> <code>ready.set()</code> after <code>site.start()</code> — pywebview can't open until the HTTP server is actually listening. This fixes a real race in many naïve implementations.</li>
+      <li><strong>Port-conflict risk is pre-addressed.</strong> The plan explicitly calls out OSError on 7654 and mandates fail-fast with a clear message — no silent retry, no wrong-port pywebview.</li>
+      <li><strong>127.0.0.1 vs localhost CORS concern is caught proactively.</strong> Standardizing on <code>127.0.0.1</code> for both bind address and pywebview URL avoids a subtle WebView2 same-origin issue that would be hard to debug after the fact.</li>
+    </ul>
+  </div>
+</body>
+</html>
